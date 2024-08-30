@@ -6,6 +6,10 @@ import java.io.IOException;
 import java.io.PrintWriter;
 
 public class SaveAndLoadNN {
+//    static GazeTracker network;
+//    SaveAndLoadNN(GazeTracker network){
+//        this.network = network;
+//    }
     // Сохранение модели в файл
     public static void saveWeights(String filename, GazeTracker network) {
         try (PrintWriter out = new PrintWriter(new FileWriter(filename))) {
@@ -30,7 +34,7 @@ public class SaveAndLoadNN {
         }
     }
     // Загрузка модели из файла
-    public static void loadWeights(String filename) {
+    public static void loadWeights(String filename, GazeTracker network) {
         File file = new File(filename);
         if (file.length() == 0) {
             // Инициализация весов с помощью Math.random(), если файл пустой
@@ -41,20 +45,20 @@ public class SaveAndLoadNN {
                 int i = 0;
                 // Загрузка весов от входного к скрытому слою
                 System.out.println("Read from file weights.txt input-hidden weigths");
-                while ((line = br.readLine()) != null && i < GazeTracker.inputToHiddenWeights.length) {
+                while ((line = br.readLine()) != null && i < network.inputToHiddenWeights.length) {
                     String[] weights = line.trim().split("\\s+");
                     for (int j = 0; j < weights.length; j++) {
-                        GazeTracker.inputToHiddenWeights[i][j] = (float)Double.parseDouble(weights[j]);
+                        network.inputToHiddenWeights[i][j] = (float)Double.parseDouble(weights[j]);
                     }
                     i++;
                 }
                 i = 0;
                 // Загрузка весов от скрытого к выходному слою
                 System.out.println("Read from file weights.txt hidden-output weigths");
-                while ((line = br.readLine()) != null && i < GazeTracker.hiddenToOutputWeights.length) {
+                while ((line = br.readLine()) != null && i < network.hiddenToOutputWeights.length) {
                     String[] weights = line.trim().split("\\s+");
                     for (int j = 0; j < weights.length; j++) {
-                        GazeTracker.hiddenToOutputWeights[i][j] = (float)Double.parseDouble(weights[j]);
+                        network.hiddenToOutputWeights[i][j] = (float)Double.parseDouble(weights[j]);
                     }
                     i++;
                 }
