@@ -13,20 +13,19 @@ import javax.imageio.ImageIO;
 public class GazeTracker {
 
     // Параметры для размера слоев
-    static int width = 1080;
-    static int height = 2200;
     private final int INPUT_NEURONS = 120 * 160;
-    private final int HIDDEN_NEURONS = 1400; //(240 * 320) / 100;
+    private final int HIDDEN_NEURONS = 5000; //(240 * 320) / 100;
     private final int OUTPUT_NEURONS = 2;
     private float[] grayImage;
     private static final int SCREEN_WIDTH  = 1080; //ScreenSizeGetter.getScreenWidth();
-    private static final int SCREEN_HEIGTH = 2200; //ScreenSizeGetter.getScreenHeight();
-    public static float LEARNING_RATE = 0.0015f;
+    private static final int SCREEN_HEIGHT = 2200; //ScreenSizeGetter.getScreenHeight();
+    public static float LEARNING_RATE = 0.0033f;
+    final float SCALE_COEFFICIENT = 2200.0f / 1080.0f;
     static float x;
     static float y;
     static float errorX;
     static float errorY;
-    static float lambda = 0.01f;
+    static float lambda = 0.001f;
     public float[] loss, newLoss;
     
 
@@ -39,13 +38,25 @@ public class GazeTracker {
     public float[] hiddenLayer = new float[HIDDEN_NEURONS];
     public float[] outputLayer = new float[OUTPUT_NEURONS];
     public int count = 1;
-    static String filename = "/home/michael/Рабочий стол/weights/weights.txt";
+    static String filename = "/home/michael/Desktop/weights/weights.txt";
     static boolean isTested = true; 
     static Random rand = new Random();
-    static final GazeTracker network = new GazeTracker();
-    private LossGraph lGraph = new LossGraph();
-    AdamOptimizer optimizerOutputToHidden = new AdamOptimizer(HIDDEN_NEURONS, OUTPUT_NEURONS, (float) 0.9, (float)0.999, (float)1e-8);
-    AdamOptimizer optimizerHiddenToInput = new AdamOptimizer(INPUT_NEURONS, HIDDEN_NEURONS, (float) 0.9, (float)0.999, (float)1e-8);
+    static GazeTracker network = new GazeTracker();
+    private final LossGraph lGraph = new LossGraph();
+
+    private final AdamOptimizer optimizerOutputToHidden = new AdamOptimizer(0.9f, 0.999f, 1e-8f);
+    private final AdamOptimizer optimizerHiddenToInput = new AdamOptimizer(0.9f, 0.999f, 1e-8f);
+
+
+    private float[][] accumulatedInputToHiddenGradients;
+    private float[] accumulatedHiddenToOutputGradients;
+
+    public void initializeGradients() {
+        // Инициализация массивов для накопления градиентов
+        accumulatedInputToHiddenGradients = new float[INPUT_NEURONS][HIDDEN_NEURONS];
+        accumulatedHiddenToOutputGradients = new float[HIDDEN_NEURONS];
+    }
+
 
     // Конструктор
     public GazeTracker() {
@@ -56,10 +67,26 @@ public class GazeTracker {
 
     }
 
+    public void accumulateGradients(float[][] inputToHiddenGradients, float[] hiddenGradients, float[] outputGradients) {
+        // Накопление градиентов для весов вход-средний слой
+        for (int i = 0; i < INPUT_NEURONS; i++) {
+            for (int j = 0; j < HIDDEN_NEURONS; j++) {
+                accumulatedInputToHiddenGradients[i][j] += inputToHiddenGradients[i][j];
+            }
+        }
+
+        // Накопление градиентов для весов средний-выходной слой
+        for (int i = 0; i < HIDDEN_NEURONS; i++) {
+            for (int j = 0; j < OUTPUT_NEURONS; j++) {
+                accumulatedHiddenToOutputGradients[i] += hiddenGradients[i] * outputGradients[j];
+            }
+        }
+    }
+
     // Инициализация весов
     static void initializeWeights() {
         if(isTested){
-            System.out.println("initialize input-hidden weigths");
+            System.out.println("initialize input-hidden weights");
         }
         for (int i = 0; i < network.INPUT_NEURONS; i++) {
             for (int j = 0; j < network.HIDDEN_NEURONS; j++) {
@@ -68,7 +95,7 @@ public class GazeTracker {
             }
         }
         if(isTested){
-            System.out.println("initialize hidden-output weigths");
+            System.out.println("initialize hidden-output weights");
         }
         for (int i = 0; i < network.HIDDEN_NEURONS; i++) {
             for (int j = 0; j < network.OUTPUT_NEURONS; j++) {
@@ -101,6 +128,9 @@ public class GazeTracker {
             }
             outputLayer[i] = activationFunction(outputLayer[i]);
         }
+
+//        // Масштабируем значение для y
+//        outputLayer[1] /= SCALE_COEFFICIENT;
     }
 
     // Функция активации (например, сигмоид)
@@ -113,78 +143,97 @@ public class GazeTracker {
         return (outputLayer[0] * width);
     }
 
-    public float getYCoordinate(int heigth) {
-        return (outputLayer[1] * heigth);
-    }
+    public float getYCoordinate(int height) { return (outputLayer[1] * height); }
+
 
     // Основная функция для тестирования
     public static void main(String[] args) throws IOException {
+        int epoch;
+        for(epoch = 21; epoch <= 40; epoch++){
 
-        // for(int i = 0; i < 50; i++) {
+            for(int i = 1; i <= 1; i++) {
 
-            SaveAndLoadNN.loadWeights(filename, network);
+                SaveAndLoadNN.loadWeights(filename, network);
 
-            if (isTested) {
-                System.out.println("Hello, I'm in main method...");
-            }
-
-            // Загрузка DataFiles
-            File folder = new File("/home/michael/Рабочий стол/batch");
-            File[] listOfFiles = folder.listFiles();
-
-            if (isTested) {
-                System.out.println("I start to prepare data, and learn NN...");
-            }
-
-            int iteration = 0;
-
-            for (File file : listOfFiles) {
-
-                if (file.isFile()) {
-                    // Тестовое RGB изображение (здесь должен быть ваш одномерный массив)
-                    BufferedImage originalImage = ImageIO.read(file);
-                    network.grayImage = ImageProcessor.convertToNormalizedArray(originalImage, 120, 160);
-
-                    String fileName = file.getName();
-                    fileName = fileName.replace("files_", ""); // Удаление "files_"
-                    String[] splitName = fileName.split("_");
-                    x = Float.parseFloat(splitName[0]);
-                    y = Float.parseFloat(splitName[1].split("\\.")[0] + "." + splitName[1].split("\\.")[1]);
-
-                    isTested = network.count % 10 == 0 ? true : false;
-                    if (isTested & network.count % 10 == 0) {
-                        System.out.println("Start to learn of NN " + network.count + " times.");
-                    }
-
-                    network.feedForward(network.grayImage);
-                    network.backpropagation(network.grayImage, x, y);
-                    network.lGraph.fillLosses(iteration, network.newLoss);
-                    iteration++;
-
-                    if (isTested & network.count % 200 == 0) {
-                        System.out.println("Save weights to file after " + network.count + " learning iterations...");
-                        SaveAndLoadNN.saveWeights(filename, network);
-                        System.out.println("Save is successful!");
-                    }
-
-                    network.count++;
-
+                if (isTested) {
+                    System.out.println("Hello, I'm in main method...");
                 }
+
+                // Загрузка DataFiles
+                File folder = new File("/home/michael/Desktop/batch/batch" + i);
+                File[] listOfFiles = folder.listFiles();
+
+
+                if (isTested) {
+                    System.out.println("I start to prepare data, and learn NN...");
+                }
+
+                int iteration = 0;
+//                network.initializeGradients();
+
+                for (File file : listOfFiles) {
+
+                    if (file.isFile()) {
+                        // Тестовое RGB изображение (здесь должен быть ваш одномерный массив)
+                        BufferedImage originalImage = ImageIO.read(file);
+                        network.grayImage = ImageProcessor.convertToNormalizedArray(originalImage, 120, 160);
+
+                        String fileName = file.getName();
+                        fileName = fileName.replace("files_", ""); // Удаление "files_"
+                        String[] splitName = fileName.split("_");
+                        x = Float.parseFloat(splitName[0]);
+                        y = Float.parseFloat(splitName[1].split("\\.")[0] + "." + splitName[1].split("\\.")[1]);
+
+                        isTested = network.count % 10 == 0 ? true : false;
+                        if (isTested & network.count % 10 == 0) {
+                            System.out.println("Start to learn of NN " + network.count + " times.");
+                        }
+
+                        network.feedForward(network.grayImage);
+                        network.backpropagation(network.grayImage, x, y);
+                        network.lGraph.fillLosses(iteration, network.newLoss);
+                        iteration++;
+
+//                    if (isTested & network.count % 200 == 0) {
+//                        System.out.println("Save weights to file after " + network.count + " learning iterations...");
+//                        SaveAndLoadNN.saveWeights(filename, network);
+//                        System.out.println("Save is successful!");
+//                    }
+
+                        network.count++;
+
+                    }
+                }
+                //network.updateWeightsWithAdam();
+                SaveAndLoadNN.saveWeights(filename, network);
+                network.lGraph.createAndSaveChart(i, epoch);
+                network.lGraph.refreshLoss();
             }
-            SaveAndLoadNN.saveWeights(filename, network);
-            network.lGraph.createAndSaveChart();
-        // }
+        }
+
+    }
+
+    public void updateWeightsWithAdam() {
+        // Обновление весов для скрытого к выходному слою
+        //optimizerOutputToHidden.updateOutputToHidden(hiddenToOutputWeights, accumulatedHiddenToOutputGradients);
+
+        // Обновление весов для входного к скрытому слою
+        optimizerHiddenToInput.updateHiddenToInput(inputToHiddenWeights, accumulatedInputToHiddenGradients);
+
+        // Обнуление накопленных градиентов после обновления весов
+        initializeGradients();
     }
 
     // Метод обратного распространения ошибки
     public void backpropagation(float[] grayImage, float expectedX, float expectedY) {
+
         float[] predicted = new float[]{outputLayer[0], outputLayer[1]};
         float[] actual = new float[]{expectedX, expectedY};
         loss = mseLosses(predicted, actual);
         if(isTested & network.count % 10 == 0){
             System.out.println("Values before backpropagation: ");
             System.out.println("NN says that x is " + network.getXCoordinate(SCREEN_WIDTH) + ", but the x is " + x);
-            System.out.println("NN says that y is " + network.getYCoordinate(SCREEN_HEIGTH) + ", but the y is " + y);
+            System.out.println("NN says that y is " + network.getYCoordinate(SCREEN_HEIGHT) + ", but the y is " + y);
             System.out.println("Loss for X is: " + loss[0] + ", and loss for Y is: " + loss[1]);
             System.out.println("Learning Rate is: " + LEARNING_RATE);
 
@@ -192,7 +241,7 @@ public class GazeTracker {
     
         // Вычисление ошибки для выходного слоя (предполагаем, что у нас 2 выходных нейрона)
         errorX = outputLayer[0] - expectedX / 1080;
-        errorY = outputLayer[1] - expectedY / 2200;
+        errorY = outputLayer[1] - expectedY/ 2200;
 
         // Градиенты для выходного слоя
         float[] outputGradients = new float[OUTPUT_NEURONS];
@@ -200,75 +249,62 @@ public class GazeTracker {
         outputGradients[1] = errorY * derivativeActivationFunction(outputLayer[1]);
 
         // Градиенты для скрытого слоя
-        float[] hiddenGradients = new float[HIDDEN_NEURONS];
+        float[][] hiddenGradients = new float[HIDDEN_NEURONS][OUTPUT_NEURONS];
+
         for (int i = 0; i < HIDDEN_NEURONS; i++) {
-            hiddenGradients[i] = 0;
             for (int j = 0; j < OUTPUT_NEURONS; j++) {
-                hiddenGradients[i] += outputGradients[j] * hiddenToOutputWeights[i][j];
+                hiddenGradients[i][j] = 0;
+                hiddenGradients[i][j] = outputGradients[j] * hiddenToOutputWeights[i][j];
             }
-            hiddenGradients[i] *= derivativeActivationFunction(hiddenLayer[i]);
+
+            hiddenGradients[i][0] *= derivativeActivationFunction(hiddenLayer[i]);
+            hiddenGradients[i][1] *= derivativeActivationFunction(hiddenLayer[i]);
+
         }
 
         // Градиенты для входного слоя
         float[][] inputToHiddenGradients = new float[INPUT_NEURONS][HIDDEN_NEURONS];
         for (int i = 0; i < INPUT_NEURONS; i++) {
             for (int j = 0; j < HIDDEN_NEURONS; j++) {
-                inputToHiddenGradients[i][j] = hiddenGradients[j] * inputToHiddenWeights[i][j] * derivativeActivationFunction(inputLayer[i]);
+                inputToHiddenGradients[i][j] = (hiddenGradients[j][0] + hiddenGradients[j][1]) * inputLayer[i];
             }
         }
 
+        // Накопление градиентов для текущего экземпляра
+        //accumulateGradients(inputToHiddenGradients, hiddenGradients, outputGradients);
 
-        optimizerOutputToHidden.updateOutputToHidden(hiddenToOutputWeights, hiddenGradients, outputGradients);
+        optimizerOutputToHidden.updateOutputToHidden(hiddenToOutputWeights, hiddenGradients);
         // Обновление весов для входного к скрытому слою
         optimizerHiddenToInput.updateHiddenToInput(inputToHiddenWeights, inputToHiddenGradients);
 
         network.feedForward(grayImage);
+        //scaledExpectedY = expectedY / SCALE_COEFFICIENT;
         float[] newPredicted = new float[] {outputLayer[0], outputLayer[1]};
-        float[] newActual = new float[] {expectedX, expectedY};
-        newLoss = mseLosses(newPredicted, newActual);
+        //float[] newActual = new float[] {expectedX, scaledExpectedY};
+        newLoss = mseLosses(newPredicted, actual);
         AdaptiveLearningRate(loss, newLoss);
         if(isTested & network.count % 10 == 0){
             System.out.println("Values after backpropagation: ");
             System.out.println("NN says that x is " + network.getXCoordinate(SCREEN_WIDTH) + ", but the x is " + x);
-            System.out.println("NN says that y is " + network.getYCoordinate(SCREEN_HEIGTH) + ", but the y is " + y);
+            System.out.println("NN says that y is " + network.getYCoordinate(SCREEN_HEIGHT) + ", but the y is " + y);
             System.out.println("Loss for X is: " + newLoss[0] + ", and loss for Y is: " + newLoss[1]);
             System.out.println("Learning Rate is: " + LEARNING_RATE + "\n");
 
         }
 
-
-
     }
 
     public void AdaptiveLearningRate(float[] loss, float[] newloss){
-        if (loss[0] < newloss[0] || loss[1] < newloss[1]) {
+        if (loss[0] <= newloss[0] & loss[1] <= newloss[1]) {
             LEARNING_RATE += LEARNING_RATE * 0.0001f;
         }else if((loss[0] > newloss[0] & loss[1] > newloss[1]) & ((LEARNING_RATE - LEARNING_RATE * 0.0001f) > 0)){
             LEARNING_RATE -= LEARNING_RATE * 0.0001f;
         }
     }
 
-    public float mseLoss(float[] predicted, float[] actual) {
-        int n = predicted.length;
-        float sum = 0.0f;
-        float diff;
-        for (int i = 0; i < n; i++) {
-            if(i == 0){
-                diff = predicted[i] - (actual[i] / 1080);
-            }
-            else{
-                diff = predicted[i] - (actual[i] / 2200);
-            }
-            //sum += diff * diff; // Используем умножение вместо Math.pow для повышения производительности
-            sum += diff;
-        }
-        return Math.abs(sum / n);
-    }
-
     public float[] mseLosses(float[] predicted, float[] actual){
         return new float[]{Math.abs(predicted[0] - (actual[0] / 1080)), Math.abs(predicted[1] - (actual[1] / 2200))};
     }
-
 
     // Производная функции активации (например, сигмоид)
     private static float derivativeActivationFunction(float x) {
